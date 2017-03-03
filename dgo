@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# This script simplifies using various versions of Golang using Docker.
+#
+# Features include:
+#
+# * Use packages in your regular GOPATH without needing to download on each
+#   build.
+# * Current environment variables are passed into the Docker container. This
+#   means you can still use things like GOOS and GOARCH.
+# * Projects that live outside of your GOPATH can still be built.
+#
+# Different versions of Golang can be accessed simply by specifying the GO
+# environment variable:
+#
+#	GO=1.8 dgo build
+#	GO=1.7 dgo build
+#	GO=1.6 dgo build
+#
+# If you don't already have the correct Docker image for the requested version
+# of Golang, the image will be downloaded before invoking the "go" command.
+#
+# NOTE: this script currently defaults to use Go 1.6 due to some performance
+# issues with 1.7+ that didn't exist in Golang<=1.6. See:
+#
+#	https://github.com/golang/go/issues/19096
+#	https://github.com/golang/go/issues/16407
+#
+
+GO=${GO:-1.6}
+WORK=${PWD/${GOPATH}//go}
+
+# pass current environment vars into container
+DGO_ENV=$(mktemp)
+env | grep -Ev '^(PATH|GOPATH)=' > "${DGO_ENV}"
+trap "rm -f '${DGO_ENV}'" EXIT
+
+# see if we're trying to build something that's not in the GOPATH tree
+_prefix=$(echo -e "${PWD}\n${GOPATH}" | grep -zoP '\A(.*)(?=.*?\n\1)')
+if [[ "${_prefix}" != "${GOPATH}" ]]; then
+	EXTRA="-v ${PWD}:/code"
+	WORK=/code
+fi
+
+docker run -it --rm \
+	-u $(id -u):$(id -g) \
+	-v ${GOPATH}:/go \
+	${EXTRA} -w ${WORK} \
+	--env-file="${DGO_ENV}" \
+	--network=host \
+	golang:${GO} \
+		go ${*}
